@@ -1,0 +1,4 @@
+themes.db
+token.txt
+__pycache__/
+*.pyc
