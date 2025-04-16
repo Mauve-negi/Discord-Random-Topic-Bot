@@ -14,7 +14,7 @@ def health():
     return "ok", 200  # 200 OKを返すことで正常と判定される
 
 def run():
-    app.run(host='0.0.0.0', port=8080)
+    app.run(host='0.0.0.0', port=8000)
 
 def keep_alive():
     t = Thread(target=run)
