@@ -1,10 +1,11 @@
 from keep_alive import keep_alive
 import db
-from datetime import datetime
+from datetime import datetime, timedelta
 import os
 import discord
 import random
 import sqlite3
+from discord.ext import tasks
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -13,7 +14,7 @@ intents.members = True
 bot = discord.Client(intents=intents)
 
 TOPIC_CHANNEL_ID = int(os.environ["TOPIC_CHANNEL_ID"])
-THEME_CHANNEL_ID = int(os.environ["THEME_CHANNEL_ID"])  # 🎯 チケット投稿専用チャンネル
+THEME_CHANNEL_ID = int(os.environ["THEME_CHANNEL_ID"])
 TICKET_ROLE_NAME = "テーマ追加チケット"
 
 LEVEL_ROLES = [
@@ -25,23 +26,41 @@ LEVEL_ROLES = [
 async def on_ready():
     print(f"✅ Botがログインしました：{bot.user}")
     db.init_db()
+    schedule_mvp.start()
+    schedule_topic.start()
+
+@tasks.loop(seconds=60)
+async def schedule_mvp():
+    now = datetime.utcnow() + timedelta(hours=9)
+    if now.hour == 8 and now.minute == 59:
+        print("⏰ 自動MVP集計を開始します")
+        thread_id = db.get_latest_thread_id()
+        if thread_id:
+            thread = bot.get_channel(thread_id)
+            if isinstance(thread, discord.Thread):
+                await process_mvp(thread)
+
+@tasks.loop(seconds=60)
+async def schedule_topic():
+    now = datetime.utcnow() + timedelta(hours=9)
+    if now.hour == 9 and now.minute == 0:
+        print("⏰ 自動お題投稿を開始します")
+        channel = bot.get_channel(TOPIC_CHANNEL_ID)
+        await post_daily_topic(channel)
 
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
 
-    # 🎲 お題を即時投稿（!topic）
     if message.content == "!topic":
         await post_daily_topic(message.channel)
         return
 
-    # 🏆 手動MVP集計（!mvp）
     if message.content == "!mvp" and isinstance(message.channel, discord.Thread):
         await process_mvp(message.channel)
         return
 
-    # 🎟 チケット所持者によるテーマ投稿（専用チャンネルのみ）
     if message.channel.id == THEME_CHANNEL_ID and TICKET_ROLE_NAME in [r.name for r in message.author.roles]:
         db.add_topic(message.content)
         guild = message.guild
@@ -50,7 +69,6 @@ async def on_message(message):
             await message.author.remove_roles(role)
         await message.reply("✅ お題を登録しました！\n🎟 チケットは回収されました。")
 
-        # 最新お題一覧をEmbedで表示
         latest_topics = get_latest_topics(5)
         embed = discord.Embed(title="🗂 現在のお題一覧（最新5件）", color=discord.Color.blue())
         for i, topic in enumerate(reversed(latest_topics), 1):
@@ -58,7 +76,6 @@ async def on_message(message):
         await message.channel.send(embed=embed)
         return
 
-# ✅ お題投稿＋スレッド生成
 async def post_daily_topic(channel):
     topic = db.get_random_topic()
     embed = discord.Embed(
@@ -84,7 +101,6 @@ async def post_daily_topic(channel):
     db.set_latest_thread_id(thread.id)
     print(f"✅ {thread_name} を作成＆記録しました。")
 
-# 🏆 MVP処理（!mvpで手動実行）
 async def process_mvp(thread):
     await thread.send("📊 MVP集計を開始します...")
 
@@ -150,13 +166,11 @@ async def process_mvp(thread):
 
     await thread.edit(archived=True, locked=True)
 
-# 🔄 お題履歴取得
 def get_latest_topics(n=5):
     with sqlite3.connect("topics.db") as conn:
         cur = conn.execute("SELECT content FROM topics ORDER BY id DESC LIMIT ?", (n,))
         return [row[0] for row in cur.fetchall()]
 
-# 🌐 Keep Alive Flask Server
 token = os.environ["DISCORD_TOKEN"]
 keep_alive()
 bot.run(token)
