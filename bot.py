@@ -32,16 +32,6 @@ async def on_ready():
     print("⏰ スケジューラー開始済み")
 
 
-@schedule_mvp.before_loop
-async def before_schedule_mvp():
-    await bot.wait_until_ready()
-
-
-@schedule_topic.before_loop
-async def before_schedule_topic():
-    await bot.wait_until_ready()
-
-
 @tasks.loop(seconds=60)
 async def schedule_mvp():
     now = datetime.utcnow() + timedelta(hours=9)
@@ -55,6 +45,11 @@ async def schedule_mvp():
                 await process_mvp(thread)
 
 
+@schedule_mvp.before_loop
+async def before_schedule_mvp():
+    await bot.wait_until_ready()
+
+
 @tasks.loop(seconds=60)
 async def schedule_topic():
     now = datetime.utcnow() + timedelta(hours=9)
@@ -62,6 +57,11 @@ async def schedule_topic():
         print("⏰ 自動お題投稿を開始します")
         channel = bot.get_channel(TOPIC_CHANNEL_ID)
         await post_daily_topic(channel)
+
+
+@schedule_topic.before_loop
+async def before_schedule_topic():
+    await bot.wait_until_ready()
 
 
 @bot.event
