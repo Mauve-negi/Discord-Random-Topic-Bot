@@ -29,6 +29,17 @@ async def on_ready():
     db.init_db()
     schedule_mvp.start()
     schedule_topic.start()
+    print("⏰ スケジューラー開始済み")
+
+
+@schedule_mvp.before_loop
+async def before_schedule_mvp():
+    await bot.wait_until_ready()
+
+
+@schedule_topic.before_loop
+async def before_schedule_topic():
+    await bot.wait_until_ready()
 
 
 @tasks.loop(seconds=60)
@@ -37,6 +48,7 @@ async def schedule_mvp():
     if now.hour == 8 and now.minute == 59:
         print("⏰ 自動MVP集計を開始します")
         thread_id = db.get_latest_thread_id()
+        print(f"📂 最新スレッドID: {thread_id}")
         if thread_id:
             thread = bot.get_channel(thread_id)
             if isinstance(thread, discord.Thread):
@@ -104,7 +116,7 @@ async def post_daily_topic(channel):
                                          auto_archive_duration=1440)
 
     db.set_latest_thread_id(thread.id)
-    print(f"✅ {thread_name} を作成＆記録しました。")
+    print(f"✅ {thread_name} を作成＆記録しました。📌 スレッドID: {thread.id}")
 
 
 async def process_mvp(thread):
