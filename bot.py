@@ -6,6 +6,7 @@ import discord
 import random
 import sqlite3
 from discord.ext import tasks
+import asyncio
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -27,6 +28,9 @@ LEVEL_ROLES = [
 async def on_ready():
     print(f"✅ Botがログインしました：{bot.user}")
     db.init_db()
+    await bot.wait_until_ready()
+    await asyncio.sleep(5)  # 起動タイミングずれ対策
+
     schedule_mvp.start()
     schedule_topic.start()
     print("⏰ スケジューラー開始済み")
@@ -35,6 +39,7 @@ async def on_ready():
 @tasks.loop(seconds=60)
 async def schedule_mvp():
     now = datetime.utcnow() + timedelta(hours=9)
+    print(f"[MVPループ] JST現在時刻: {now.strftime('%H:%M:%S')}")
     if now.hour == 8 and now.minute == 59:
         print("⏰ 自動MVP集計を開始します")
         thread_id = db.get_latest_thread_id()
@@ -53,6 +58,7 @@ async def before_schedule_mvp():
 @tasks.loop(seconds=60)
 async def schedule_topic():
     now = datetime.utcnow() + timedelta(hours=9)
+    print(f"[Topicループ] JST現在時刻: {now.strftime('%H:%M:%S')}")
     if now.hour == 9 and now.minute == 0:
         print("⏰ 自動お題投稿を開始します")
         channel = bot.get_channel(TOPIC_CHANNEL_ID)
