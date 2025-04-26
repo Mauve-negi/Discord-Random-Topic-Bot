@@ -6,7 +6,6 @@ WORKDIR /app
 
 # すべてのファイルをコピー
 COPY . .
-COPY topics.db /app/topics.db  # ⬅️この行を追加する
 
 # パッケージをインストール（キャッシュ削除で軽量化）
 RUN pip install --no-cache-dir -r requirements.txt
