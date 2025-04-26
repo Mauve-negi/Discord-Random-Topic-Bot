@@ -1,12 +1,27 @@
-# bot.py
-
 from keep_alive import keep_alive
 import db
 from datetime import datetime, timedelta
 import os
 import discord
 import random
+import shutil
+import sqlite3
 from discord.ext import tasks
+
+# ===============================
+# 初回起動時、topics.dbを/dataにコピーする
+# ===============================
+DATA_DB_PATH = "/data/topics.db"
+APP_DB_PATH = "/app/topics.db"
+
+if not os.path.exists("/data"):
+    os.makedirs("/data", exist_ok=True)
+
+if os.path.exists(APP_DB_PATH) and not os.path.exists(DATA_DB_PATH):
+    shutil.copy(APP_DB_PATH, DATA_DB_PATH)
+    print("✅ 初期topics.dbを/dataにコピーしました")
+
+# ===============================
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -62,22 +77,17 @@ async def on_message(message):
         await post_daily_topic(message.channel)
         return
 
+    if message.content == "!alltopics":
+        await list_all_topics(message.channel)
+        return
+
     if message.content == "!mvp" and isinstance(message.channel,
                                                 discord.Thread):
         await process_mvp(message.channel)
         return
 
-    if message.content == "!alltopics":
-        await show_all_topics(message.channel)
-        return
-
     if message.content.startswith("!yoyaku "):
-        reserved_topic = message.content[len("!yoyaku "):].strip()
-        if db.is_topic_exists(reserved_topic):
-            db.reserve_topic(reserved_topic)
-            await message.reply(f"✅ 『{reserved_topic}』を予約しました！")
-        else:
-            await message.reply("⚠️ そのお題は登録されていません。!alltopicsで確認してください。")
+        await reserve_topic(message)
         return
 
     if message.channel.id == THEME_CHANNEL_ID and TICKET_ROLE_NAME in [
@@ -90,7 +100,7 @@ async def on_message(message):
             await message.author.remove_roles(role)
         await message.reply("✅ お題を登録しました！\n🎟 チケットは回収されました。")
 
-        latest_topics = get_latest_topics(5)
+        latest_topics = db.get_latest_topics(5)
         embed = discord.Embed(title="🗂 現在のお題一覧（最新5件）",
                               color=discord.Color.blue())
         for i, topic in enumerate(reversed(latest_topics), 1):
@@ -100,8 +110,11 @@ async def on_message(message):
 
 
 async def post_daily_topic(channel):
-    topic = db.pop_reserved_topic()
-    if not topic:
+    reserved = db.pop_reserved_topic()
+    if reserved:
+        topic = reserved
+        print("✅ 予約お題を投稿しました")
+    else:
         topic = db.get_random_topic()
 
     embed = discord.Embed(title="📌 今日のお題",
@@ -193,26 +206,28 @@ async def process_mvp(thread):
     await thread.edit(archived=True, locked=True)
 
 
-async def show_all_topics(channel):
+async def list_all_topics(channel):
     topics = db.get_all_topics()
     if not topics:
-        await channel.send("⚠️ 登録されているお題がありません。")
+        await channel.send("⚠️ 現在お題が登録されていません。")
         return
 
-    chunks = [topics[i:i + 10] for i in range(0, len(topics), 10)]
-    for idx, chunk in enumerate(chunks, 1):
-        embed = discord.Embed(title=f"🗂 お題一覧（{idx}/{len(chunks)})",
-                              color=discord.Color.teal())
-        for i, topic in enumerate(chunk, 1):
-            embed.add_field(name=f"{i}", value=topic, inline=False)
-        await channel.send(embed=embed)
+    embed = discord.Embed(title="🗂 現在登録されているお題一覧", color=discord.Color.blue())
+    for i, topic in enumerate(topics, 1):
+        embed.add_field(name=f"{i}.", value=topic, inline=False)
+    await channel.send(embed=embed)
 
 
-def get_latest_topics(n=5):
-    with sqlite3.connect("/data/topics.db") as conn:
-        cur = conn.execute(
-            "SELECT content FROM topics ORDER BY id DESC LIMIT ?", (n, ))
-        return [row[0] for row in cur.fetchall()]
+async def reserve_topic(message):
+    content = message.content[8:].strip()
+    if not content:
+        await message.channel.send("⚠️ 予約するお題を入力してください。（例：`!yoyaku お題名`）")
+        return
+    if db.topic_exists(content):
+        db.add_reserved_topic(content)
+        await message.channel.send(f"✅ お題『{content}』を予約しました！")
+    else:
+        await message.channel.send("⚠️ 指定されたお題が登録されていません。")
 
 
 token = os.environ["DISCORD_TOKEN"]
