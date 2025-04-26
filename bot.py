@@ -6,7 +6,6 @@ import discord
 import random
 import sqlite3
 from discord.ext import tasks
-import asyncio
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -28,46 +27,29 @@ LEVEL_ROLES = [
 async def on_ready():
     print(f"✅ Botがログインしました：{bot.user}")
     db.init_db()
-    await bot.wait_until_ready()
-    await asyncio.sleep(5)  # 起動タイミングずれ対策
-
     schedule_mvp.start()
     schedule_topic.start()
-    print("⏰ スケジューラー開始済み")
 
 
 @tasks.loop(seconds=60)
 async def schedule_mvp():
     now = datetime.utcnow() + timedelta(hours=9)
-    print(f"[MVPループ] JST現在時刻: {now.strftime('%H:%M:%S')}")
     if now.hour == 8 and now.minute == 59:
         print("⏰ 自動MVP集計を開始します")
-        thread_id = db.get_latest_thread_id()
-        print(f"📂 最新スレッドID: {thread_id}")
-        if thread_id:
+        pending_threads = db.get_pending_threads()
+        for thread_id in pending_threads:
             thread = bot.get_channel(thread_id)
             if isinstance(thread, discord.Thread):
                 await process_mvp(thread)
 
 
-@schedule_mvp.before_loop
-async def before_schedule_mvp():
-    await bot.wait_until_ready()
-
-
 @tasks.loop(seconds=60)
 async def schedule_topic():
     now = datetime.utcnow() + timedelta(hours=9)
-    print(f"[Topicループ] JST現在時刻: {now.strftime('%H:%M:%S')}")
     if now.hour == 9 and now.minute == 0:
         print("⏰ 自動お題投稿を開始します")
         channel = bot.get_channel(TOPIC_CHANNEL_ID)
         await post_daily_topic(channel)
-
-
-@schedule_topic.before_loop
-async def before_schedule_topic():
-    await bot.wait_until_ready()
 
 
 @bot.event
@@ -82,6 +64,22 @@ async def on_message(message):
     if message.content == "!mvp" and isinstance(message.channel,
                                                 discord.Thread):
         await process_mvp(message.channel)
+        return
+
+    if message.content == "!alltopics":
+        topics = db.get_all_topics()
+        if not topics:
+            await message.channel.send("⚠️ 登録されているお題がありません。")
+            return
+
+        embed = discord.Embed(title="🗂 現在登録されているお題一覧",
+                              color=discord.Color.green())
+        for idx, (topic_id, content) in enumerate(topics, start=1):
+            embed.add_field(name=f"{idx}.", value=content, inline=False)
+            if idx >= 20:
+                break  # 一度に20件まで表示（Discord制限対策）
+
+        await message.channel.send(embed=embed)
         return
 
     if message.channel.id == THEME_CHANNEL_ID and TICKET_ROLE_NAME in [
@@ -121,8 +119,8 @@ async def post_daily_topic(channel):
                                          message=message,
                                          auto_archive_duration=1440)
 
-    db.set_latest_thread_id(thread.id)
-    print(f"✅ {thread_name} を作成＆記録しました。📌 スレッドID: {thread.id}")
+    db.add_pending_thread(thread.id)
+    print(f"✅ {thread_name} を作成＆未集計リストに登録しました。")
 
 
 async def process_mvp(thread):
@@ -192,6 +190,9 @@ async def process_mvp(thread):
         await thread.send(embed=embed)
 
     await thread.edit(archived=True, locked=True)
+
+    # MVP集計後に、未集計リストから除外
+    db.remove_pending_thread(thread.id)
 
 
 def get_latest_topics(n=5):
