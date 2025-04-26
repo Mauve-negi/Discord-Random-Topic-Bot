@@ -36,8 +36,8 @@ async def schedule_mvp():
     now = datetime.utcnow() + timedelta(hours=9)
     if now.hour == 8 and now.minute == 59:
         print("⏰ 自動MVP集計を開始します")
-        pending_threads = db.get_pending_threads()
-        for thread_id in pending_threads:
+        thread_id = db.get_latest_thread_id()
+        if thread_id:
             thread = bot.get_channel(thread_id)
             if isinstance(thread, discord.Thread):
                 await process_mvp(thread)
@@ -57,6 +57,16 @@ async def on_message(message):
     if message.author == bot.user:
         return
 
+    if message.content.startswith("!yoyaku "):
+        topic_content = message.content[len("!yoyaku "):].strip()
+        topic_id = db.find_topic_id_by_content(topic_content)
+        if topic_id:
+            db.add_reserved_topic(topic_id)
+            await message.channel.send(f"✅ 予約完了：『{topic_content}』")
+        else:
+            await message.channel.send(f"⚠️ 登録されていないお題です：『{topic_content}』")
+        return
+
     if message.content == "!topic":
         await post_daily_topic(message.channel)
         return
@@ -67,19 +77,7 @@ async def on_message(message):
         return
 
     if message.content == "!alltopics":
-        topics = db.get_all_topics()
-        if not topics:
-            await message.channel.send("⚠️ 登録されているお題がありません。")
-            return
-
-        embed = discord.Embed(title="🗂 現在登録されているお題一覧",
-                              color=discord.Color.green())
-        for idx, (topic_id, content) in enumerate(topics, start=1):
-            embed.add_field(name=f"{idx}.", value=content, inline=False)
-            if idx >= 20:
-                break  # 一度に20件まで表示（Discord制限対策）
-
-        await message.channel.send(embed=embed)
+        await show_all_topics(message.channel)
         return
 
     if message.channel.id == THEME_CHANNEL_ID and TICKET_ROLE_NAME in [
@@ -92,17 +90,10 @@ async def on_message(message):
             await message.author.remove_roles(role)
         await message.reply("✅ お題を登録しました！\n🎟 チケットは回収されました。")
 
-        latest_topics = get_latest_topics(5)
-        embed = discord.Embed(title="🗂 現在のお題一覧（最新5件）",
-                              color=discord.Color.blue())
-        for i, topic in enumerate(reversed(latest_topics), 1):
-            embed.add_field(name=f"{i}.", value=topic, inline=False)
-        await message.channel.send(embed=embed)
-        return
-
 
 async def post_daily_topic(channel):
-    topic = db.get_random_topic()
+    reserved_topic = db.pop_reserved_topic_content()
+    topic = reserved_topic if reserved_topic else db.get_random_topic()
     embed = discord.Embed(title="📌 今日のお題",
                           description=f"『{topic}』",
                           color=discord.Color.purple())
@@ -119,40 +110,33 @@ async def post_daily_topic(channel):
                                          message=message,
                                          auto_archive_duration=1440)
 
-    db.add_pending_thread(thread.id)
-    print(f"✅ {thread_name} を作成＆未集計リストに登録しました。")
+    db.set_latest_thread_id(thread.id)
+    print(f"✅ {thread_name} を作成＆記録しました。")
 
 
 async def process_mvp(thread):
     await thread.send("📊 MVP集計を開始します...")
-
     max_reactions = 0
     mvp_user = None
-
     async for msg in thread.history(limit=None):
         total_reacts = sum(r.count for r in msg.reactions)
         if total_reacts > max_reactions:
             max_reactions = total_reacts
             mvp_user = msg.author
-
     if not mvp_user:
         await thread.send("⚠️ MVP候補が見つかりませんでした。")
         return
-
     guild = thread.guild
     member = guild.get_member(mvp_user.id)
     if member is None:
         await thread.send("⚠️ MVPのユーザー情報を取得できませんでした。")
         return
-
     current_level = -1
     for i, role_name in enumerate(LEVEL_ROLES):
         if any(role.name == role_name for role in member.roles):
             current_level = i
             break
-
     next_level = current_level + 1
-
     if next_level < len(LEVEL_ROLES):
         old_role = discord.utils.get(
             guild.roles,
@@ -191,15 +175,20 @@ async def process_mvp(thread):
 
     await thread.edit(archived=True, locked=True)
 
-    # MVP集計後に、未集計リストから除外
-    db.remove_pending_thread(thread.id)
 
-
-def get_latest_topics(n=5):
+async def show_all_topics(channel):
     with sqlite3.connect("topics.db") as conn:
-        cur = conn.execute(
-            "SELECT content FROM topics ORDER BY id DESC LIMIT ?", (n, ))
-        return [row[0] for row in cur.fetchall()]
+        cur = conn.execute("SELECT id, content FROM topics ORDER BY id")
+        topics = cur.fetchall()
+
+    if not topics:
+        await channel.send("⚠️ お題が登録されていません。")
+        return
+
+    embed = discord.Embed(title="🗂 登録済みのお題一覧", color=discord.Color.green())
+    for tid, content in topics:
+        embed.add_field(name=f"ID {tid}", value=content, inline=False)
+    await channel.send(embed=embed)
 
 
 token = os.environ["DISCORD_TOKEN"]
