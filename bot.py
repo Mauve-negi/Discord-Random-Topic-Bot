@@ -66,24 +66,39 @@ async def on_message(message):
         await process_mvp(message.channel)
         return
 
+    if message.content.startswith("!yoyaku "):
+        topic = message.content.replace("!yoyaku ", "").strip()
+        if db.topic_exists(topic):
+            if db.reserve_topic(topic):
+                await message.reply(f"✅ お題『{topic}』を次回投稿候補に予約しました。")
+            else:
+                await message.reply(f"⚠️ お題『{topic}』はすでに予約済みです。")
+        else:
+            await message.reply("⚠️ 指定されたお題は存在しません。")
+        return
+
     if message.content == "!alltopics":
-        topics = get_latest_topics(50)
-        embed = discord.Embed(title="🗂 現在のお題一覧（最大50件）",
-                              color=discord.Color.teal())
-        for i, topic in enumerate(reversed(topics), 1):
-            embed.add_field(name=f"{i}.", value=topic, inline=False)
-        await message.channel.send(embed=embed)
+        topics = db.get_all_topics()
+        if topics:
+            embed = discord.Embed(title="🗂 登録済みのお題一覧",
+                                  color=discord.Color.blue())
+            for i, t in enumerate(topics, 1):
+                embed.add_field(name=f"{i}.", value=t, inline=False)
+            await message.channel.send(embed=embed)
+        else:
+            await message.channel.send("⚠️ お題が登録されていません。")
         return
 
     if message.channel.id == THEME_CHANNEL_ID and TICKET_ROLE_NAME in [
             r.name for r in message.author.roles
     ]:
         db.add_topic(message.content)
+        db.reserve_topic(message.content)  # ← お題登録時に自動で予約
         guild = message.guild
         role = discord.utils.get(guild.roles, name=TICKET_ROLE_NAME)
         if role:
             await message.author.remove_roles(role)
-        await message.reply("✅ お題を登録しました！\n🎟 チケットは回収されました。")
+        await message.reply("✅ お題を登録＆予約しました！\n🎟 チケットは回収されました。")
 
         latest_topics = get_latest_topics(5)
         embed = discord.Embed(title="🗂 現在のお題一覧（最新5件）",
@@ -95,7 +110,7 @@ async def on_message(message):
 
 
 async def post_daily_topic(channel):
-    topic = db.get_random_topic()
+    topic = db.pop_reserved_topic() or db.get_random_topic()
     embed = discord.Embed(title="📌 今日のお題",
                           description=f"『{topic}』",
                           color=discord.Color.purple())
@@ -118,40 +133,34 @@ async def post_daily_topic(channel):
 async def process_mvp(thread):
     await thread.send("📊 MVP集計を開始します...")
 
-    reaction_counts = {}
-    async for msg in thread.history(limit=None):
-        total = sum(r.count for r in msg.reactions)
-        if total > 0:
-            if msg.author in reaction_counts:
-                reaction_counts[msg.author] += total
-            else:
-                reaction_counts[msg.author] = total
+    max_reactions = 0
+    candidates = []
 
-    if not reaction_counts:
+    async for msg in thread.history(limit=None):
+        total_reacts = sum(r.count for r in msg.reactions)
+        if total_reacts > max_reactions:
+            max_reactions = total_reacts
+            candidates = [msg.author]
+        elif total_reacts == max_reactions:
+            candidates.append(msg.author)
+
+    if not candidates:
         await thread.send("⚠️ MVP候補が見つかりませんでした。")
         return
 
-    max_reactions = max(reaction_counts.values())
-    winners = [
-        user for user, count in reaction_counts.items()
-        if count == max_reactions
-    ]
-
     guild = thread.guild
-    mentions = []
-    for user in winners:
-        member = guild.get_member(user.id)
-        if not member:
+    for member in candidates:
+        m = guild.get_member(member.id)
+        if not m:
             continue
 
         current_level = -1
         for i, role_name in enumerate(LEVEL_ROLES):
-            if any(role.name == role_name for role in member.roles):
+            if any(role.name == role_name for role in m.roles):
                 current_level = i
                 break
 
         next_level = current_level + 1
-
         if next_level < len(LEVEL_ROLES):
             old_role = discord.utils.get(guild.roles,
                                          name=LEVEL_ROLES[current_level]
@@ -159,25 +168,36 @@ async def process_mvp(thread):
             new_role = discord.utils.get(guild.roles,
                                          name=LEVEL_ROLES[next_level])
             if old_role:
-                await member.remove_roles(old_role)
+                await m.remove_roles(old_role)
             if new_role:
-                await member.add_roles(new_role)
-            mentions.append(f"{member.mention}（{LEVEL_ROLES[next_level]}へ昇格）")
+                await m.add_roles(new_role)
+            embed = discord.Embed(
+                title="🏆 今日のMVP",
+                description=f"{m.mention} さんが最もリアクションを集めました！",
+                color=discord.Color.gold())
+            embed.add_field(name="✨ ロール昇格",
+                            value=f"→ {LEVEL_ROLES[next_level]}",
+                            inline=False)
+            embed.set_footer(text=f"リアクション数：{max_reactions}")
+            await thread.send(embed=embed)
         else:
             old_role = discord.utils.get(guild.roles,
                                          name=LEVEL_ROLES[current_level])
             ticket_role = discord.utils.get(guild.roles, name=TICKET_ROLE_NAME)
             if old_role:
-                await member.remove_roles(old_role)
+                await m.remove_roles(old_role)
             if ticket_role:
-                await member.add_roles(ticket_role)
-            mentions.append(f"{member.mention}（テーマ追加チケット獲得🎟）")
+                await m.add_roles(ticket_role)
+            embed = discord.Embed(
+                title="🏆 今日のMVP",
+                description=f"{m.mention} さんが最もリアクションを集めました！",
+                color=discord.Color.gold())
+            embed.add_field(name="🎟 ご褒美",
+                            value="→ テーマ追加チケットを獲得！",
+                            inline=False)
+            embed.set_footer(text=f"リアクション数：{max_reactions}")
+            await thread.send(embed=embed)
 
-    embed = discord.Embed(title="🏆 今日のMVP",
-                          description="\n".join(mentions),
-                          color=discord.Color.gold())
-    embed.set_footer(text=f"リアクション数：{max_reactions}")
-    await thread.send(embed=embed)
     await thread.edit(archived=True, locked=True)
 
 
