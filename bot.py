@@ -1,4 +1,3 @@
-from keep_alive import keep_alive  # Replit等使っていなければ削除可
 import db
 from datetime import datetime, timedelta
 import os
@@ -33,9 +32,8 @@ async def on_ready():
 
         topics = db.get_all_topics()
         print(f"📄 現在の登録お題数: {len(topics)}")
-        if topics:
-            for t in topics:
-                print(f"- {t}")
+        for t in topics:
+            print(f"- {t}")
 
         reserved = db.get_reserved_theme()
         print(f"📌 現在の予約お題: {reserved}")
@@ -232,5 +230,4 @@ async def process_mvp(thread):
 
 # ---- 起動処理 ----
 token = os.environ["DISCORD_TOKEN"]
-keep_alive()  # Replitで使っていないなら削除してもOK
 bot.run(token)
