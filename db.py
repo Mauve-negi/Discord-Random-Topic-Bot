@@ -32,7 +32,7 @@ def init_db():
     conn.close()
 
 
-def register_theme(theme):
+def add_topic(theme):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("INSERT INTO themes (content) VALUES (?)", (theme, ))
@@ -40,19 +40,10 @@ def register_theme(theme):
     conn.close()
 
 
-def get_random_theme():
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT content FROM themes ORDER BY RANDOM() LIMIT 1")
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else None
-
-
 def get_all_topics():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT content FROM themes ORDER BY id DESC")
+    c.execute("SELECT content FROM themes ORDER BY id ASC")
     rows = c.fetchall()
     conn.close()
     return [row[0] for row in rows]
@@ -76,7 +67,7 @@ def topic_exists(theme):
     return result is not None
 
 
-def set_reserved_theme(theme):
+def reserve_topic(theme):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
     c.execute("REPLACE INTO config (key, value) VALUES ('reserved_theme', ?)",
@@ -94,8 +85,20 @@ def get_reserved_theme():
     return row[0] if row else None
 
 
-def reserve_topic(theme):
-    set_reserved_theme(theme)
+def get_reserved_or_random_topic():
+    topic = get_reserved_theme()
+    if topic and topic.strip():
+        return topic.strip()
+    return get_random_topic() or "（お題未登録）"
+
+
+def get_random_topic():
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("SELECT content FROM themes ORDER BY RANDOM() LIMIT 1")
+    row = c.fetchone()
+    conn.close()
+    return row[0] if row else None
 
 
 def set_latest_thread_id(thread_id):
@@ -140,12 +143,5 @@ def increment_mvp_count(user_id):
     conn.close()
 
 
-def get_reserved_or_random_topic():
-    topic = get_reserved_theme()
-    if topic:
-        return topic
-    return get_random_theme()
-
-
-# 初期化
+# 初期化（Bot起動時に一度だけ呼ばれる）
 init_db()
