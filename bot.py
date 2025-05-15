@@ -17,10 +17,9 @@ THEME_CHANNEL_ID = int(os.environ["THEME_CHANNEL_ID"])
 TICKET_ROLE_NAME = "テーマ追加チケット"
 
 LEVEL_ROLES = [
-    "ふぇちのわかり手Lv.1", "ふぇちのわかり手Lv.2", "ふぇちのわかり手Lv.3", "ふぇちのわかり手Lv.4",
-    "ふぇちのわかり手Lv.5"
+    "ふぇちのわかり手Lv.1", "ふぇちのわかり手Lv.2", "ふぇちのわかり手Lv.3",
+    "ふぇちのわかり手Lv.4", "ふぇちのわかり手Lv.5"
 ]
-
 
 @bot.event
 async def on_ready():
@@ -28,7 +27,6 @@ async def on_ready():
     db.init_db()
     schedule_mvp.start()
     schedule_topic.start()
-
 
 @tasks.loop(seconds=60)
 async def schedule_mvp():
@@ -41,7 +39,6 @@ async def schedule_mvp():
             if isinstance(thread, discord.Thread):
                 await process_mvp(thread)
 
-
 @tasks.loop(seconds=60)
 async def schedule_topic():
     now = datetime.utcnow() + timedelta(hours=9)
@@ -49,7 +46,6 @@ async def schedule_topic():
         print("⏰ 自動お題投稿を開始します")
         channel = bot.get_channel(TOPIC_CHANNEL_ID)
         await post_daily_topic(channel)
-
 
 @bot.event
 async def on_message(message):
@@ -69,8 +65,7 @@ async def on_message(message):
         await message.channel.send(embed=embed)
         return
 
-    if message.content == "!mvp" and isinstance(message.channel,
-                                                discord.Thread):
+    if message.content == "!mvp" and isinstance(message.channel, discord.Thread):
         await process_mvp(message.channel)
         return
 
@@ -83,9 +78,7 @@ async def on_message(message):
             await message.reply("⚠️ そのお題は登録されていません。!alltopicsで確認できます。")
         return
 
-    if message.channel.id == THEME_CHANNEL_ID and TICKET_ROLE_NAME in [
-            r.name for r in message.author.roles
-    ]:
+    if message.channel.id == THEME_CHANNEL_ID and TICKET_ROLE_NAME in [r.name for r in message.author.roles]:
         db.add_topic(message.content)
         db.reserve_topic(message.content)
 
@@ -102,7 +95,6 @@ async def on_message(message):
             embed.add_field(name=f"{i}.", value=topic, inline=False)
         await message.channel.send(embed=embed)
         return
-
 
 async def post_daily_topic(channel):
     topic = db.get_reserved_or_random_topic()
@@ -125,7 +117,6 @@ async def post_daily_topic(channel):
     db.set_latest_thread_id(thread.id)
     print(f"✅ {thread_name} を作成＆記録しました。")
 
-
 async def process_mvp(thread):
     await thread.send("📊 MVP集計を開始します...")
 
@@ -143,9 +134,7 @@ async def process_mvp(thread):
         return
 
     max_count = max(reaction_counts.values())
-    mvp_users = [
-        user for user, count in reaction_counts.items() if count == max_count
-    ]
+    mvp_users = [user for user, count in reaction_counts.items() if count == max_count]
 
     guild = thread.guild
     for mvp_user in mvp_users:
@@ -161,11 +150,8 @@ async def process_mvp(thread):
 
         next_level = current_level + 1
         if next_level < len(LEVEL_ROLES):
-            old_role = discord.utils.get(guild.roles,
-                                         name=LEVEL_ROLES[current_level]
-                                         ) if current_level >= 0 else None
-            new_role = discord.utils.get(guild.roles,
-                                         name=LEVEL_ROLES[next_level])
+            old_role = discord.utils.get(guild.roles, name=LEVEL_ROLES[current_level]) if current_level >= 0 else None
+            new_role = discord.utils.get(guild.roles, name=LEVEL_ROLES[next_level])
             if old_role:
                 await member.remove_roles(old_role)
             if new_role:
@@ -173,10 +159,9 @@ async def process_mvp(thread):
                 await thread.send(embed=discord.Embed(
                     title="🏆 今日のMVP",
                     description=f"{member.mention} さんが最もリアクションを集めました！",
-                    color=discord.Color.gold()).add_field(
-                        name="✨ ロール昇格",
-                        value=f"→ {LEVEL_ROLES[next_level]}",
-                        inline=False).set_footer(text=f"リアクション数：{max_count}"))
+                    color=discord.Color.gold()
+                ).add_field(name="✨ ロール昇格", value=f"→ {LEVEL_ROLES[next_level]}", inline=False)
+                 .set_footer(text=f"リアクション数：{max_count}"))
         else:
             ticket_role = discord.utils.get(guild.roles, name=TICKET_ROLE_NAME)
             if ticket_role:
@@ -184,12 +169,11 @@ async def process_mvp(thread):
                 await thread.send(embed=discord.Embed(
                     title="🏆 今日のMVP",
                     description=f"{member.mention} さんが最もリアクションを集めました！",
-                    color=discord.Color.gold()).add_field(
-                        name="🎟 ご褒美", value="→ テーマ追加チケットを獲得！",
-                        inline=False).set_footer(text=f"リアクション数：{max_count}"))
+                    color=discord.Color.gold()
+                ).add_field(name="🎟 ご褒美", value="→ テーマ追加チケットを獲得！", inline=False)
+                 .set_footer(text=f"リアクション数：{max_count}"))
 
     await thread.edit(archived=True, locked=True)
-
 
 token = os.environ["DISCORD_TOKEN"]
 keep_alive()
