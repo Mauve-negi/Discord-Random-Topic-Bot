@@ -143,5 +143,5 @@ def increment_mvp_count(user_id):
     conn.close()
 
 
-# 初期化（Bot起動時に一度だけ呼ばれる）
+# 初期化
 init_db()
