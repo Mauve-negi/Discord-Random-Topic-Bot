@@ -1,27 +1,24 @@
 import sqlite3
 import random
 
-DB_NAME = "topics.db"
+DB_NAME = "/data/topics.db"
 
 
 def init_db():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-
     c.execute('''
         CREATE TABLE IF NOT EXISTS topics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             content TEXT NOT NULL
         )
     ''')
-
     c.execute('''
         CREATE TABLE IF NOT EXISTS config (
             key TEXT PRIMARY KEY,
             value TEXT
         )
     ''')
-
     conn.commit()
     conn.close()
 
@@ -68,7 +65,7 @@ def reserve_topic(content):
     current = c.fetchone()
     if current and current[0] == content:
         conn.close()
-        return False  # すでに予約されている
+        return False
     c.execute("REPLACE INTO config (key, value) VALUES ('reserved', ?)",
               (content, ))
     conn.commit()

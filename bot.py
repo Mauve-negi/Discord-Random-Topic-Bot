@@ -2,17 +2,14 @@ import db
 from datetime import datetime, timedelta
 import os
 import discord
-import sqlite3
 from discord.ext import tasks
 
-# ---- IntentとBot定義 ----
 intents = discord.Intents.default()
 intents.message_content = True
 intents.members = True
 
 bot = discord.Client(intents=intents)
 
-# ---- 環境変数から各種IDを取得 ----
 TOPIC_CHANNEL_ID = int(os.environ["TOPIC_CHANNEL_ID"])
 THEME_CHANNEL_ID = int(os.environ["THEME_CHANNEL_ID"])
 TICKET_ROLE_NAME = "テーマ追加チケット"
@@ -27,27 +24,22 @@ LEVEL_ROLES = [
 async def on_ready():
     try:
         db.init_db()
-
         channel = bot.get_channel(TOPIC_CHANNEL_ID)
         if channel:
-            await channel.send("✅ Botが起動しました！（on_readyから送信）")
-
+            await channel.send("✅ Botが起動しました！（on_ready）")
             topics = db.get_all_topics()
             reserved = db.get_reserved_theme()
-
             embed = discord.Embed(title="🗂 起動時のDB状態",
                                   color=discord.Color.green())
             embed.add_field(name="登録お題数", value=str(len(topics)), inline=False)
             embed.add_field(name="予約お題", value=reserved or "なし", inline=False)
             await channel.send(embed=embed)
-
         schedule_mvp.start()
         schedule_topic.start()
-
     except Exception as e:
         channel = bot.get_channel(TOPIC_CHANNEL_ID)
         if channel:
-            await channel.send(f"❌ Bot起動中にエラーが発生しました:\n`{e}`")
+            await channel.send(f"❌ 起動エラー: `{e}`")
 
 
 @tasks.loop(seconds=60)
@@ -83,8 +75,6 @@ async def on_message(message):
         if not topics:
             await message.channel.send("⚠️ お題が登録されていません。")
             return
-
-        embeds = []
         for i in range(0, len(topics), 25):
             chunk = topics[i:i + 25]
             embed = discord.Embed(title="🗂 登録済みのお題一覧",
@@ -92,9 +82,6 @@ async def on_message(message):
                                   color=discord.Color.blue())
             for j, topic in enumerate(chunk, start=i + 1):
                 embed.add_field(name=f"{j}.", value=topic, inline=False)
-            embeds.append(embed)
-
-        for embed in embeds:
             await message.channel.send(embed=embed)
         return
 
@@ -107,9 +94,9 @@ async def on_message(message):
         topic = message.content.replace("!yoyaku ", "").strip()
         if db.topic_exists(topic):
             if db.reserve_topic(topic):
-                await message.reply(f"✅ お題『{topic}』を次回投稿候補に予約しました。")
+                await message.reply(f"✅ お題『{topic}』を次回予約しました。")
             else:
-                await message.reply(f"⚠️ お題『{topic}』はすでに予約済みです。")
+                await message.reply(f"⚠️ 『{topic}』はすでに予約済みです。")
         else:
             await message.reply("⚠️ 指定されたお題は存在しません。")
         return
@@ -119,17 +106,14 @@ async def on_message(message):
     ]:
         db.add_topic(message.content)
         db.reserve_topic(message.content)
-        guild = message.guild
-        role = discord.utils.get(guild.roles, name=TICKET_ROLE_NAME)
+        role = discord.utils.get(message.guild.roles, name=TICKET_ROLE_NAME)
         if role:
             await message.author.remove_roles(role)
         await message.reply("✅ お題を登録＆予約しました！\n🎟 チケットは回収されました。")
-
-        latest_topics = db.get_latest_topics(5)
-        embed = discord.Embed(title="🗂 現在のお題一覧（最新5件）",
-                              color=discord.Color.blue())
-        for i, topic in enumerate(reversed(latest_topics), 1):
-            embed.add_field(name=f"{i}.", value=topic, inline=False)
+        latest = db.get_latest_topics(5)
+        embed = discord.Embed(title="🗂 最新のお題", color=discord.Color.blue())
+        for i, t in enumerate(reversed(latest), 1):
+            embed.add_field(name=f"{i}.", value=t, inline=False)
         await message.channel.send(embed=embed)
         return
 
@@ -139,88 +123,60 @@ async def post_daily_topic(channel):
     embed = discord.Embed(title="📌 今日のお題",
                           description=f"『{topic}』",
                           color=discord.Color.purple())
-    embed.set_footer(text="遠慮なく語ってみてください！")
-
-    message = await channel.send(embed=embed)
-
-    today_str = datetime.utcnow().strftime("%Y/%m/%d")
-    thread_name = f"{today_str}【{topic}】"
-    if len(thread_name) > 100:
-        thread_name = thread_name[:97] + "…"
-
-    thread = await channel.create_thread(name=thread_name,
-                                         message=message,
+    embed.set_footer(text="語ってみましょう！")
+    msg = await channel.send(embed=embed)
+    name = f"{datetime.utcnow().strftime('%Y/%m/%d')}【{topic}】"
+    if len(name) > 100:
+        name = name[:97] + "…"
+    thread = await channel.create_thread(name=name,
+                                         message=msg,
                                          auto_archive_duration=1440)
     db.set_latest_thread_id(thread.id)
 
 
 async def process_mvp(thread):
-    await thread.send("📊 MVP集計を開始します...")
-
-    reaction_counts = {}
+    await thread.send("📊 MVP集計中...")
+    counts = {}
     async for msg in thread.history(limit=None):
-        count = sum(r.count for r in msg.reactions)
-        if count > 0:
-            if msg.author in reaction_counts:
-                reaction_counts[msg.author] += count
-            else:
-                reaction_counts[msg.author] = count
-
-    if not reaction_counts:
-        await thread.send("⚠️ MVP候補が見つかりませんでした。")
+        c = sum(r.count for r in msg.reactions)
+        if c > 0:
+            counts[msg.author] = counts.get(msg.author, 0) + c
+    if not counts:
+        await thread.send("⚠️ MVP候補なし。")
         return
-
-    max_count = max(reaction_counts.values())
-    winners = [
-        user for user, count in reaction_counts.items() if count == max_count
-    ]
-
-    guild = thread.guild
+    max_c = max(counts.values())
+    winners = [u for u, c in counts.items() if c == max_c]
     for user in winners:
-        member = guild.get_member(user.id)
+        member = thread.guild.get_member(user.id)
         if not member:
             continue
-
-        current_level = -1
-        for i, role_name in enumerate(LEVEL_ROLES):
-            if any(role.name == role_name for role in member.roles):
-                current_level = i
-                break
-
-        next_level = current_level + 1
+        level = next((i for i, r in enumerate(LEVEL_ROLES)
+                      if any(role.name == r for role in member.roles)), -1)
+        next_level = level + 1
         if next_level < len(LEVEL_ROLES):
-            old_role = discord.utils.get(guild.roles,
-                                         name=LEVEL_ROLES[current_level]
-                                         ) if current_level >= 0 else None
-            new_role = discord.utils.get(guild.roles,
-                                         name=LEVEL_ROLES[next_level])
-            if old_role:
-                await member.remove_roles(old_role)
-            if new_role:
-                await member.add_roles(new_role)
-                embed = discord.Embed(
-                    title="🏆 今日のMVP",
-                    description=f"{member.mention} さんが最もリアクションを集めました！",
-                    color=discord.Color.gold())
-                embed.add_field(name="✨ ロール昇格",
-                                value=f"→ {LEVEL_ROLES[next_level]}",
-                                inline=False)
-                embed.set_footer(text=f"リアクション数：{max_count}")
-                await thread.send(embed=embed)
+            if level >= 0:
+                old = discord.utils.get(thread.guild.roles,
+                                        name=LEVEL_ROLES[level])
+                if old: await member.remove_roles(old)
+            new = discord.utils.get(thread.guild.roles,
+                                    name=LEVEL_ROLES[next_level])
+            if new: await member.add_roles(new)
+            await thread.send(
+                embed=discord.Embed(title="🏆 MVP",
+                                    description=f"{member.mention} が昇格！",
+                                    color=discord.Color.gold()).add_field(
+                                        name="ロール昇格",
+                                        value=f"→ {LEVEL_ROLES[next_level]}",
+                                        inline=False))
         else:
-            ticket_role = discord.utils.get(guild.roles, name=TICKET_ROLE_NAME)
-            if ticket_role:
-                await member.add_roles(ticket_role)
-                embed = discord.Embed(
-                    title="🏆 今日のMVP",
-                    description=f"{member.mention} さんが最もリアクションを集めました！",
-                    color=discord.Color.gold())
-                embed.add_field(name="🎟 ご褒美",
-                                value="→ テーマ追加チケットを獲得！",
-                                inline=False)
-                embed.set_footer(text=f"リアクション数：{max_count}")
-                await thread.send(embed=embed)
-
+            ticket = discord.utils.get(thread.guild.roles,
+                                       name=TICKET_ROLE_NAME)
+            if ticket: await member.add_roles(ticket)
+            await thread.send(
+                embed=discord.Embed(title="🏆 MVP",
+                                    description=f"{member.mention} がチケットを獲得！",
+                                    color=discord.Color.gold()).
+                add_field(name="🎟 ご褒美", value="→ テーマ追加チケット", inline=False))
     await thread.edit(archived=True, locked=True)
 
 
