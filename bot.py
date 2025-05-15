@@ -27,9 +27,26 @@ LEVEL_ROLES = [
 @bot.event
 async def on_ready():
     print(f"✅ Botがログインしました：{bot.user}")
-    db.init_db()
-    schedule_mvp.start()
-    schedule_topic.start()
+
+    try:
+        db.init_db()
+
+        topics = db.get_all_topics()
+        print(f"📄 現在の登録お題数: {len(topics)}")
+        if topics:
+            for t in topics:
+                print(f"- {t}")
+
+        reserved = db.get_reserved_theme()
+        print(f"📌 現在の予約お題: {reserved}")
+
+        schedule_mvp.start()
+        schedule_topic.start()
+
+        print("🟢 on_ready 完了")
+
+    except Exception as e:
+        print(f"❌ on_ready 内でエラーが発生しました: {e}")
 
 
 # ---- 毎日8:59 MVP集計 ----
