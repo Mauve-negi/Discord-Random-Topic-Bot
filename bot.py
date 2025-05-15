@@ -80,14 +80,22 @@ async def on_message(message):
 
     if message.content == "!alltopics":
         topics = db.get_all_topics()
-        if topics:
-            embed = discord.Embed(title="🗂 登録済みのお題一覧",
-                                  color=discord.Color.blue())
-            for i, t in enumerate(topics, 1):
-                embed.add_field(name=f"{i}.", value=t, inline=False)
-            await message.channel.send(embed=embed)
-        else:
+        if not topics:
             await message.channel.send("⚠️ お題が登録されていません。")
+            return
+
+        embeds = []
+        for i in range(0, len(topics), 25):
+            chunk = topics[i:i + 25]
+            embed = discord.Embed(title="🗂 登録済みのお題一覧",
+                                  description=f"{i+1} ～ {i+len(chunk)} 件目",
+                                  color=discord.Color.blue())
+            for j, topic in enumerate(chunk, start=i + 1):
+                embed.add_field(name=f"{j}.", value=topic, inline=False)
+            embeds.append(embed)
+
+        for embed in embeds:
+            await message.channel.send(embed=embed)
         return
 
     if message.content == "!mvp" and isinstance(message.channel,
