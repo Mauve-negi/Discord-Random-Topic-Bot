@@ -50,7 +50,6 @@ async def on_ready():
             await channel.send(f"❌ Bot起動中にエラーが発生しました:\n`{e}`")
 
 
-# ---- 毎日8:59 MVP集計 ----
 @tasks.loop(seconds=60)
 async def schedule_mvp():
     now = datetime.utcnow() + timedelta(hours=9)
@@ -62,7 +61,6 @@ async def schedule_mvp():
                 await process_mvp(thread)
 
 
-# ---- 毎日9:00 お題投稿 ----
 @tasks.loop(seconds=60)
 async def schedule_topic():
     now = datetime.utcnow() + timedelta(hours=9)
@@ -71,7 +69,6 @@ async def schedule_topic():
         await post_daily_topic(channel)
 
 
-# ---- on_message ----
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
@@ -82,18 +79,15 @@ async def on_message(message):
         return
 
     if message.content == "!alltopics":
-        all_topics = db.get_all_topics()
-        if not all_topics:
-            await message.channel.send("⚠️ 登録されたお題がありません。")
-            return
-
-        embed = discord.Embed(title="🗂 現在登録されているお題一覧",
-                              color=discord.Color.blue())
-        for i, topic in enumerate(all_topics, 1):
-            embed.add_field(name=f"{i}.", value=topic, inline=False)
-            if i >= 25:
-                break
-        await message.channel.send(embed=embed)
+        topics = db.get_all_topics()
+        if topics:
+            embed = discord.Embed(title="🗂 登録済みのお題一覧",
+                                  color=discord.Color.blue())
+            for i, t in enumerate(topics, 1):
+                embed.add_field(name=f"{i}.", value=t, inline=False)
+            await message.channel.send(embed=embed)
+        else:
+            await message.channel.send("⚠️ お題が登録されていません。")
         return
 
     if message.content == "!mvp" and isinstance(message.channel,
@@ -102,12 +96,14 @@ async def on_message(message):
         return
 
     if message.content.startswith("!yoyaku "):
-        content = message.content[len("!yoyaku "):].strip()
-        if db.topic_exists(content):
-            db.reserve_topic(content)
-            await message.reply(f"✅ お題『{content}』を次回の候補として予約しました！")
+        topic = message.content.replace("!yoyaku ", "").strip()
+        if db.topic_exists(topic):
+            if db.reserve_topic(topic):
+                await message.reply(f"✅ お題『{topic}』を次回投稿候補に予約しました。")
+            else:
+                await message.reply(f"⚠️ お題『{topic}』はすでに予約済みです。")
         else:
-            await message.reply("⚠️ そのお題は登録されていません。!alltopicsで確認できます。")
+            await message.reply("⚠️ 指定されたお題は存在しません。")
         return
 
     if message.channel.id == THEME_CHANNEL_ID and TICKET_ROLE_NAME in [
@@ -115,12 +111,10 @@ async def on_message(message):
     ]:
         db.add_topic(message.content)
         db.reserve_topic(message.content)
-
         guild = message.guild
         role = discord.utils.get(guild.roles, name=TICKET_ROLE_NAME)
         if role:
             await message.author.remove_roles(role)
-
         await message.reply("✅ お題を登録＆予約しました！\n🎟 チケットは回収されました。")
 
         latest_topics = db.get_latest_topics(5)
@@ -132,9 +126,8 @@ async def on_message(message):
         return
 
 
-# ---- お題投稿処理 ----
 async def post_daily_topic(channel):
-    topic = db.get_reserved_or_random_topic()
+    topic = db.pop_reserved_topic() or db.get_random_topic()
     embed = discord.Embed(title="📌 今日のお題",
                           description=f"『{topic}』",
                           color=discord.Color.purple())
@@ -153,7 +146,6 @@ async def post_daily_topic(channel):
     db.set_latest_thread_id(thread.id)
 
 
-# ---- MVP処理 ----
 async def process_mvp(thread):
     await thread.send("📊 MVP集計を開始します...")
 
@@ -171,14 +163,14 @@ async def process_mvp(thread):
         return
 
     max_count = max(reaction_counts.values())
-    mvp_users = [
+    winners = [
         user for user, count in reaction_counts.items() if count == max_count
     ]
 
     guild = thread.guild
-    for mvp_user in mvp_users:
-        member = guild.get_member(mvp_user.id)
-        if member is None:
+    for user in winners:
+        member = guild.get_member(user.id)
+        if not member:
             continue
 
         current_level = -1
@@ -198,27 +190,31 @@ async def process_mvp(thread):
                 await member.remove_roles(old_role)
             if new_role:
                 await member.add_roles(new_role)
-                await thread.send(embed=discord.Embed(
+                embed = discord.Embed(
                     title="🏆 今日のMVP",
                     description=f"{member.mention} さんが最もリアクションを集めました！",
-                    color=discord.Color.gold()).add_field(
-                        name="✨ ロール昇格",
-                        value=f"→ {LEVEL_ROLES[next_level]}",
-                        inline=False).set_footer(text=f"リアクション数：{max_count}"))
+                    color=discord.Color.gold())
+                embed.add_field(name="✨ ロール昇格",
+                                value=f"→ {LEVEL_ROLES[next_level]}",
+                                inline=False)
+                embed.set_footer(text=f"リアクション数：{max_count}")
+                await thread.send(embed=embed)
         else:
             ticket_role = discord.utils.get(guild.roles, name=TICKET_ROLE_NAME)
             if ticket_role:
                 await member.add_roles(ticket_role)
-                await thread.send(embed=discord.Embed(
+                embed = discord.Embed(
                     title="🏆 今日のMVP",
                     description=f"{member.mention} さんが最もリアクションを集めました！",
-                    color=discord.Color.gold()).add_field(
-                        name="🎟 ご褒美", value="→ テーマ追加チケットを獲得！",
-                        inline=False).set_footer(text=f"リアクション数：{max_count}"))
+                    color=discord.Color.gold())
+                embed.add_field(name="🎟 ご褒美",
+                                value="→ テーマ追加チケットを獲得！",
+                                inline=False)
+                embed.set_footer(text=f"リアクション数：{max_count}")
+                await thread.send(embed=embed)
 
     await thread.edit(archived=True, locked=True)
 
 
-# ---- 起動処理 ----
 token = os.environ["DISCORD_TOKEN"]
 bot.run(token)

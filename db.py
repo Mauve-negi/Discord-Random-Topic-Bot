@@ -1,6 +1,7 @@
 import sqlite3
+import random
 
-DB_NAME = "themes.db"
+DB_NAME = "topics.db"
 
 
 def init_db():
@@ -8,7 +9,7 @@ def init_db():
     c = conn.cursor()
 
     c.execute('''
-        CREATE TABLE IF NOT EXISTS themes (
+        CREATE TABLE IF NOT EXISTS topics (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             content TEXT NOT NULL
         )
@@ -21,21 +22,14 @@ def init_db():
         )
     ''')
 
-    c.execute('''
-        CREATE TABLE IF NOT EXISTS mvp_counts (
-            user_id INTEGER PRIMARY KEY,
-            count INTEGER NOT NULL DEFAULT 0
-        )
-    ''')
-
     conn.commit()
     conn.close()
 
 
-def add_topic(theme):
+def add_topic(content):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("INSERT INTO themes (content) VALUES (?)", (theme, ))
+    c.execute("INSERT INTO topics (content) VALUES (?)", (content, ))
     conn.commit()
     conn.close()
 
@@ -43,7 +37,7 @@ def add_topic(theme):
 def get_all_topics():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT content FROM themes ORDER BY id ASC")
+    c.execute("SELECT content FROM topics ORDER BY id ASC")
     rows = c.fetchall()
     conn.close()
     return [row[0] for row in rows]
@@ -52,50 +46,61 @@ def get_all_topics():
 def get_latest_topics(n=5):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT content FROM themes ORDER BY id DESC LIMIT ?", (n, ))
+    c.execute("SELECT content FROM topics ORDER BY id DESC LIMIT ?", (n, ))
     rows = c.fetchall()
     conn.close()
     return [row[0] for row in rows]
 
 
-def topic_exists(theme):
+def topic_exists(content):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT 1 FROM themes WHERE content = ?", (theme, ))
-    result = c.fetchone()
+    c.execute("SELECT 1 FROM topics WHERE content = ?", (content, ))
+    exists = c.fetchone() is not None
     conn.close()
-    return result is not None
+    return exists
 
 
-def reserve_topic(theme):
+def reserve_topic(content):
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("REPLACE INTO config (key, value) VALUES ('reserved_theme', ?)",
-              (theme, ))
+    c.execute("SELECT value FROM config WHERE key = 'reserved'")
+    current = c.fetchone()
+    if current and current[0] == content:
+        conn.close()
+        return False  # すでに予約されている
+    c.execute("REPLACE INTO config (key, value) VALUES ('reserved', ?)",
+              (content, ))
     conn.commit()
     conn.close()
+    return True
 
 
 def get_reserved_theme():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT value FROM config WHERE key = 'reserved_theme'")
+    c.execute("SELECT value FROM config WHERE key = 'reserved'")
     row = c.fetchone()
     conn.close()
     return row[0] if row else None
 
 
-def get_reserved_or_random_topic():
+def pop_reserved_topic():
     topic = get_reserved_theme()
-    if topic and topic.strip():
-        return topic.strip()
-    return get_random_topic() or "（お題未登録）"
+    if not topic:
+        return None
+    conn = sqlite3.connect(DB_NAME)
+    c = conn.cursor()
+    c.execute("DELETE FROM config WHERE key = 'reserved'")
+    conn.commit()
+    conn.close()
+    return topic
 
 
 def get_random_topic():
     conn = sqlite3.connect(DB_NAME)
     c = conn.cursor()
-    c.execute("SELECT content FROM themes ORDER BY RANDOM() LIMIT 1")
+    c.execute("SELECT content FROM topics ORDER BY RANDOM() LIMIT 1")
     row = c.fetchone()
     conn.close()
     return row[0] if row else None
@@ -118,30 +123,3 @@ def get_latest_thread_id():
     row = c.fetchone()
     conn.close()
     return int(row[0]) if row else None
-
-
-def get_mvp_count(user_id):
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    c.execute("SELECT count FROM mvp_counts WHERE user_id = ?", (user_id, ))
-    row = c.fetchone()
-    conn.close()
-    return row[0] if row else 0
-
-
-def increment_mvp_count(user_id):
-    current = get_mvp_count(user_id)
-    conn = sqlite3.connect(DB_NAME)
-    c = conn.cursor()
-    if current == 0:
-        c.execute("INSERT INTO mvp_counts (user_id, count) VALUES (?, ?)",
-                  (user_id, 1))
-    else:
-        c.execute("UPDATE mvp_counts SET count = ? WHERE user_id = ?",
-                  (current + 1, user_id))
-    conn.commit()
-    conn.close()
-
-
-# 初期化
-init_db()
