@@ -25,26 +25,29 @@ LEVEL_ROLES = [
 
 @bot.event
 async def on_ready():
-    print(f"✅ Botがログインしました：{bot.user}")
-
     try:
         db.init_db()
 
-        topics = db.get_all_topics()
-        print(f"📄 現在の登録お題数: {len(topics)}")
-        for t in topics:
-            print(f"- {t}")
+        channel = bot.get_channel(TOPIC_CHANNEL_ID)
+        if channel:
+            await channel.send("✅ Botが起動しました！（on_readyから送信）")
 
-        reserved = db.get_reserved_theme()
-        print(f"📌 現在の予約お題: {reserved}")
+            topics = db.get_all_topics()
+            reserved = db.get_reserved_theme()
+
+            embed = discord.Embed(title="🗂 起動時のDB状態",
+                                  color=discord.Color.green())
+            embed.add_field(name="登録お題数", value=str(len(topics)), inline=False)
+            embed.add_field(name="予約お題", value=reserved or "なし", inline=False)
+            await channel.send(embed=embed)
 
         schedule_mvp.start()
         schedule_topic.start()
 
-        print("🟢 on_ready 完了")
-
     except Exception as e:
-        print(f"❌ on_ready 内でエラーが発生しました: {e}")
+        channel = bot.get_channel(TOPIC_CHANNEL_ID)
+        if channel:
+            await channel.send(f"❌ Bot起動中にエラーが発生しました:\n`{e}`")
 
 
 # ---- 毎日8:59 MVP集計 ----
@@ -52,7 +55,6 @@ async def on_ready():
 async def schedule_mvp():
     now = datetime.utcnow() + timedelta(hours=9)
     if now.hour == 8 and now.minute == 59:
-        print("⏰ 自動MVP集計を開始します")
         thread_id = db.get_latest_thread_id()
         if thread_id:
             thread = bot.get_channel(thread_id)
@@ -65,29 +67,22 @@ async def schedule_mvp():
 async def schedule_topic():
     now = datetime.utcnow() + timedelta(hours=9)
     if now.hour == 9 and now.minute == 0:
-        print("⏰ 自動お題投稿を開始します")
         channel = bot.get_channel(TOPIC_CHANNEL_ID)
         await post_daily_topic(channel)
 
 
-# ---- on_message (コマンドとテーマ登録処理) ----
+# ---- on_message ----
 @bot.event
 async def on_message(message):
     if message.author == bot.user:
         return
 
-    print(f"📩 メッセージ受信：{message.content}")
-
     if message.content == "!topic":
-        print("✅ !topic コマンド受信")
         await post_daily_topic(message.channel)
         return
 
     if message.content == "!alltopics":
-        print("✅ !alltopics コマンド受信")
         all_topics = db.get_all_topics()
-        print(f"🔢 お題件数: {len(all_topics)}")
-
         if not all_topics:
             await message.channel.send("⚠️ 登録されたお題がありません。")
             return
@@ -103,12 +98,10 @@ async def on_message(message):
 
     if message.content == "!mvp" and isinstance(message.channel,
                                                 discord.Thread):
-        print("✅ !mvp コマンド受信")
         await process_mvp(message.channel)
         return
 
     if message.content.startswith("!yoyaku "):
-        print("✅ !yoyaku コマンド受信")
         content = message.content[len("!yoyaku "):].strip()
         if db.topic_exists(content):
             db.reserve_topic(content)
@@ -120,7 +113,6 @@ async def on_message(message):
     if message.channel.id == THEME_CHANNEL_ID and TICKET_ROLE_NAME in [
             r.name for r in message.author.roles
     ]:
-        print("✅ チケット所持者によるお題投稿を検出")
         db.add_topic(message.content)
         db.reserve_topic(message.content)
 
@@ -159,7 +151,6 @@ async def post_daily_topic(channel):
                                          message=message,
                                          auto_archive_duration=1440)
     db.set_latest_thread_id(thread.id)
-    print(f"✅ スレッド作成成功：{thread.name}（ID: {thread.id}）")
 
 
 # ---- MVP処理 ----
