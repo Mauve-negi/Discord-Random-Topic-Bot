@@ -13,7 +13,7 @@ bot = discord.Client(intents=intents)
 
 TOPIC_CHANNEL_ID = int(os.environ["TOPIC_CHANNEL_ID"])
 THEME_CHANNEL_ID = int(os.environ["THEME_CHANNEL_ID"])
-LOG_CHANNEL_ID = 1372852084461797396  # ログ出力用チャンネルID
+LOG_CHANNEL_ID = int(os.environ["LOG_CHANNEL_ID"])  # ログ出力用チャンネルID ← 修正
 TICKET_ROLE_NAME = "テーマ追加チケット"
 
 LEVEL_ROLES = [
@@ -194,23 +194,27 @@ async def process_mvp(thread):
     if not counts:
         await thread.send("⚠️ MVP候補なし。")
         return
+
     max_c = max(counts.values())
     winners = [u for u, c in counts.items() if c == max_c]
+    mvp_members = []
+    guild = thread.guild
+
     for user in winners:
-        member = thread.guild.get_member(user.id)
+        member = guild.get_member(user.id)
         if not member:
             continue
+
         level = next((i for i, r in enumerate(LEVEL_ROLES)
                       if any(role.name == r for role in member.roles)), -1)
         next_level = level + 1
+
         if next_level < len(LEVEL_ROLES):
             if level >= 0:
-                old = discord.utils.get(thread.guild.roles,
-                                        name=LEVEL_ROLES[level])
+                old = discord.utils.get(guild.roles, name=LEVEL_ROLES[level])
                 if old:
                     await member.remove_roles(old)
-            new = discord.utils.get(thread.guild.roles,
-                                    name=LEVEL_ROLES[next_level])
+            new = discord.utils.get(guild.roles, name=LEVEL_ROLES[next_level])
             if new:
                 await member.add_roles(new)
             await thread.send(
@@ -221,8 +225,10 @@ async def process_mvp(thread):
                                         value=f"→ {LEVEL_ROLES[next_level]}",
                                         inline=False))
         else:
-            ticket = discord.utils.get(thread.guild.roles,
-                                       name=TICKET_ROLE_NAME)
+            lv5_role = discord.utils.get(guild.roles, name=LEVEL_ROLES[-1])
+            if lv5_role:
+                await member.remove_roles(lv5_role)
+            ticket = discord.utils.get(guild.roles, name=TICKET_ROLE_NAME)
             if ticket:
                 await member.add_roles(ticket)
             await thread.send(
@@ -230,6 +236,22 @@ async def process_mvp(thread):
                                     description=f"{member.mention} がチケットを獲得！",
                                     color=discord.Color.gold()).
                 add_field(name="🎟 ご褒美", value="→ テーマ追加チケット", inline=False))
+
+        mvp_members.append((member, level))
+
+    eligible_for_bonus = [
+        member for member, level in mvp_members if level < len(LEVEL_ROLES) - 1
+    ]
+
+    if eligible_for_bonus and random.random() < 0.15:
+        bonus_winner = random.choice(eligible_for_bonus)
+        ticket = discord.utils.get(guild.roles, name=TICKET_ROLE_NAME)
+        if ticket:
+            await bonus_winner.add_roles(ticket)
+        await thread.send(
+            f"{bonus_winner.mention} さんにボーナスでいきなりチケット付与しました！\nお題登録に使ってネ(*´∀｀*)"
+        )
+
     await thread.edit(archived=True, locked=True)
 
 
