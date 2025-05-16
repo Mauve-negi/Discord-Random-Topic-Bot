@@ -12,6 +12,7 @@ bot = discord.Client(intents=intents)
 
 TOPIC_CHANNEL_ID = int(os.environ["TOPIC_CHANNEL_ID"])
 THEME_CHANNEL_ID = int(os.environ["THEME_CHANNEL_ID"])
+LOG_CHANNEL_ID = 1372852084461797396  # ログ出力用チャンネル
 TICKET_ROLE_NAME = "テーマ追加チケット"
 
 LEVEL_ROLES = [
@@ -24,33 +25,65 @@ LEVEL_ROLES = [
 async def on_ready():
     try:
         db.init_db()
-        channel = bot.get_channel(TOPIC_CHANNEL_ID)
-        if channel:
-            await channel.send("✅ Botが起動しました！（on_ready）")
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+
+        if log_channel:
+            await log_channel.send("✅ Botが起動しました！（on_ready）")
+
+            thread_id = db.get_latest_thread_id()
+            if thread_id:
+                thread = bot.get_channel(thread_id)
+                if isinstance(thread, discord.Thread):
+                    await log_channel.send(
+                        f"🧵 最新スレッド: `{thread.name}`\n🆔 ID: `{thread.id}`")
+                else:
+                    await log_channel.send(
+                        f"⚠️ 記録されたID `{thread_id}` はスレッドではありません（{type(thread)}）"
+                    )
+            else:
+                await log_channel.send("⚠️ 最新スレッドIDが記録されていません。")
+
             topics = db.get_all_topics()
             reserved = db.get_reserved_theme()
             embed = discord.Embed(title="🗂 起動時のDB状態",
                                   color=discord.Color.green())
             embed.add_field(name="登録お題数", value=str(len(topics)), inline=False)
             embed.add_field(name="予約お題", value=reserved or "なし", inline=False)
-            await channel.send(embed=embed)
+            await log_channel.send(embed=embed)
+
         schedule_mvp.start()
         schedule_topic.start()
+
     except Exception as e:
-        channel = bot.get_channel(TOPIC_CHANNEL_ID)
-        if channel:
-            await channel.send(f"❌ 起動エラー: `{e}`")
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        if log_channel:
+            await log_channel.send(f"❌ 起動エラー: `{e}`")
 
 
 @tasks.loop(seconds=60)
 async def schedule_mvp():
     now = datetime.utcnow() + timedelta(hours=9)
     if now.hour == 8 and now.minute == 59:
+        log_channel = bot.get_channel(LOG_CHANNEL_ID)
+        await log_channel.send("⏰ 自動MVP集計ループが発火しました")
+
         thread_id = db.get_latest_thread_id()
-        if thread_id:
-            thread = bot.get_channel(thread_id)
-            if isinstance(thread, discord.Thread):
-                await process_mvp(thread)
+        if not thread_id:
+            await log_channel.send("⚠️ get_latest_thread_id() → None")
+            return
+
+        thread = bot.get_channel(thread_id)
+        if thread is None:
+            await log_channel.send(f"⚠️ bot.get_channel({thread_id}) → None")
+            return
+
+        if not isinstance(thread, discord.Thread):
+            await log_channel.send(
+                f"⚠️ ID {thread_id} はスレッド型ではありません（{type(thread)}）")
+            return
+
+        await log_channel.send(f"✅ MVP対象スレッド: {thread.name}（ID: {thread.id}）")
+        await process_mvp(thread)
 
 
 @tasks.loop(seconds=60)
@@ -157,10 +190,12 @@ async def process_mvp(thread):
             if level >= 0:
                 old = discord.utils.get(thread.guild.roles,
                                         name=LEVEL_ROLES[level])
-                if old: await member.remove_roles(old)
+                if old:
+                    await member.remove_roles(old)
             new = discord.utils.get(thread.guild.roles,
                                     name=LEVEL_ROLES[next_level])
-            if new: await member.add_roles(new)
+            if new:
+                await member.add_roles(new)
             await thread.send(
                 embed=discord.Embed(title="🏆 MVP",
                                     description=f"{member.mention} が昇格！",
@@ -171,7 +206,8 @@ async def process_mvp(thread):
         else:
             ticket = discord.utils.get(thread.guild.roles,
                                        name=TICKET_ROLE_NAME)
-            if ticket: await member.add_roles(ticket)
+            if ticket:
+                await member.add_roles(ticket)
             await thread.send(
                 embed=discord.Embed(title="🏆 MVP",
                                     description=f"{member.mention} がチケットを獲得！",
