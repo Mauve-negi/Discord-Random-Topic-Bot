@@ -3,6 +3,7 @@ from datetime import datetime, timedelta
 import os
 import discord
 from discord.ext import tasks
+import random
 
 intents = discord.Intents.default()
 intents.message_content = True
@@ -12,7 +13,7 @@ bot = discord.Client(intents=intents)
 
 TOPIC_CHANNEL_ID = int(os.environ["TOPIC_CHANNEL_ID"])
 THEME_CHANNEL_ID = int(os.environ["THEME_CHANNEL_ID"])
-LOG_CHANNEL_ID = 1372852084461797396  # ログ出力用チャンネル
+LOG_CHANNEL_ID = 1372852084461797396  # ログ出力用チャンネルID
 TICKET_ROLE_NAME = "テーマ追加チケット"
 
 LEVEL_ROLES = [
@@ -121,6 +122,22 @@ async def on_message(message):
     if message.content == "!mvp" and isinstance(message.channel,
                                                 discord.Thread):
         await process_mvp(message.channel)
+        return
+
+    if message.content == "!topictest" and message.channel.id == LOG_CHANNEL_ID:
+        topics = db.get_all_topics()
+        if len(topics) < 5:
+            await message.channel.send("⚠️ 登録お題が5件未満です。")
+            return
+
+        sampled = random.sample(topics, 5)
+        embed = discord.Embed(
+            title="🎲 ランダムお題テスト表示",
+            description="現在の登録お題からランダムに5件を表示します（スレッドは作成されません）",
+            color=discord.Color.teal())
+        for i, topic in enumerate(sampled, 1):
+            embed.add_field(name=f"{i}.", value=topic, inline=False)
+        await message.channel.send(embed=embed)
         return
 
     if message.content.startswith("!yoyaku "):
