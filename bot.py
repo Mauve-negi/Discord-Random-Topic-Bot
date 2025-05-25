@@ -45,11 +45,13 @@ async def on_ready():
                 await log_channel.send("⚠️ 最新スレッドIDが記録されていません。")
 
             topics = db.get_all_topics()
-            reserved = db.get_reserved_theme()
+            reserved = db.get_reserved_themes()
             embed = discord.Embed(title="🗂 起動時のDB状態",
                                   color=discord.Color.green())
             embed.add_field(name="登録お題数", value=str(len(topics)), inline=False)
-            embed.add_field(name="予約お題", value=reserved or "なし", inline=False)
+            embed.add_field(name="予約お題",
+                            value="\n".join(reserved) if reserved else "なし",
+                            inline=False)
             await log_channel.send(embed=embed)
 
         schedule_mvp.start()
