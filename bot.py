@@ -183,7 +183,50 @@ async def on_message(message):
 
 
 async def post_daily_topic(channel):
-    topic = db.pop_reserved_topic() or db.get_random_topic()
+    log_channel = bot.get_channel(LOG_CHANNEL_ID)
+    reserved = db.pop_reserved_topic()
+
+    if reserved:
+        topic = reserved
+        reason = "予約お題を優先採用"
+    else:
+        recent = db.get_recent_topics()  # {1: 昨日, 2: 一昨日, 3: 3日前}
+        history = {}
+        MAX_ATTEMPTS = 20
+        topic = None
+
+        for attempt in range(1, MAX_ATTEMPTS + 1):
+            candidate = db.get_random_topic()
+            if not candidate:
+                continue
+            history[candidate] = history.get(candidate, 0) + 1
+
+            if candidate == recent.get(1) and history[candidate] >= 4:
+                topic = candidate
+                break
+            elif candidate == recent.get(2) and history[candidate] >= 3:
+                topic = candidate
+                break
+            elif candidate == recent.get(3) and history[candidate] >= 2:
+                topic = candidate
+                break
+            elif candidate not in recent.values():
+                topic = candidate
+                break
+
+        reason = "再抽選内訳：" + ", ".join(
+            [f"{k}: {v}回" for k, v in history.items()]) if topic else "抽選失敗"
+
+    db.set_day_n_topic(3, db.get_recent_topics().get(2))
+    db.set_day_n_topic(2, db.get_recent_topics().get(1))
+    db.set_day_n_topic(1, topic)
+
+    embed_log = discord.Embed(title="📌 本日のお題が決定しました",
+                              description=f"『{topic}』",
+                              color=discord.Color.purple())
+    embed_log.add_field(name="選出理由", value=reason, inline=False)
+    await log_channel.send(embed=embed_log)
+
     embed = discord.Embed(title="📌 今日のお題",
                           description=f"『{topic}』",
                           color=discord.Color.purple())
