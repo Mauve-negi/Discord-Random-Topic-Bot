@@ -121,6 +121,18 @@ async def on_message(message):
             await message.channel.send(embed=embed)
         return
 
+    if message.content == "!reserved":
+        reserved = db.get_reserved_themes()
+        if not reserved:
+            await message.channel.send("📭 現在、予約されているお題はありません。")
+            return
+        embed = discord.Embed(title="📌 現在の予約お題リスト",
+                              color=discord.Color.orange())
+        for i, topic in enumerate(reserved, 1):
+            embed.add_field(name=f"{i}.", value=topic, inline=False)
+        await message.channel.send(embed=embed)
+        return
+
     if message.content == "!mvp" and isinstance(message.channel,
                                                 discord.Thread):
         await process_mvp(message.channel)
